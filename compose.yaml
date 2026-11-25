@@ -36,6 +36,18 @@ services:
       db:
         condition: service_healthy
 
+  api:
+    build: .
+    environment:
+      ConnectionStrings__Default: "Server=db,1433;Database=PropertyMaintenance;User Id=sa;Password=${DB_PASSWORD:-Dev_Passw0rd_2026};TrustServerCertificate=True"
+      Database__SeedOnStartup: "true"
+    ports:
+      - "${API_PORT:-5080}:8080"   
+    depends_on:
+      db:
+        condition: service_healthy   
+    restart: on-failure
+
 volumes:
   db-data:
   nuget-cache:
