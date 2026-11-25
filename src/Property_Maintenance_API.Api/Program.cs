@@ -38,6 +38,7 @@ app.MapPropertyEndpoints();
 app.MapTenantEndpoints();
 app.MapReportEndpoints();
 app.MapMaintenanceRequestQueries();
+app.MapMaintenanceRequestCommands();
 
 await app.Services.GetRequiredService<MigrationRunner>().RunAsync(app.Lifetime.ApplicationStopping);
 
