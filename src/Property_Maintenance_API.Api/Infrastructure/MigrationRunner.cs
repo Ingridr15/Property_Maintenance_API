@@ -5,9 +5,14 @@ using Microsoft.Data.SqlClient;
 
 namespace Property_Maintenance_API.Api.Infrastructure;
 
+// Aplica los scripts que falten, en orden por nombre: primero database/migrations
+// (estructura) y, si Database:SeedOnStartup es true, database/seed (datos de prueba).
+// Lleva el registro en dbo.SchemaMigrations para no aplicar dos veces el mismo.
 // Cada script corre en su propia transacción: o se aplica completo o no se aplica.
-public sealed partial class MigrationRunner(SqlConnectionFactory factory, ILogger<MigrationRunner> logger)
+public sealed partial class MigrationRunner(
+    SqlConnectionFactory factory, IConfiguration configuration, ILogger<MigrationRunner> logger)
 {
+    // Separa los lotes por las líneas que solo dicen GO (igual que sqlcmd).
     [GeneratedRegex(@"^\s*GO\s*;?\s*$", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
     private static partial Regex GoSeparator();
 
@@ -29,7 +34,12 @@ public sealed partial class MigrationRunner(SqlConnectionFactory factory, ILogge
         var applied = (await connection.QueryAsync<string>("SELECT ScriptName FROM dbo.SchemaMigrations"))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (name, sql) in LoadScripts())
+        // Primero la estructura; después, si está habilitado, los datos de prueba.
+        var scripts = LoadScripts("migrations/").ToList();
+        if (configuration.GetValue("Database:SeedOnStartup", false))
+            scripts.AddRange(LoadScripts("seed/"));
+
+        foreach (var (name, sql) in scripts)
         {
             if (applied.Contains(name))
                 continue;
@@ -49,6 +59,8 @@ public sealed partial class MigrationRunner(SqlConnectionFactory factory, ILogge
         logger.LogInformation("Base de datos al día");
     }
 
+    // SQL Server en Docker tarda unos segundos en aceptar conexiones: reintenta.
+    // Se conecta a "master" para crear la base si todavía no existe.
     private async Task WaitAndCreateDatabaseAsync(CancellationToken ct)
     {
         var builder = new SqlConnectionStringBuilder(factory.ConnectionString);
@@ -78,22 +90,24 @@ public sealed partial class MigrationRunner(SqlConnectionFactory factory, ILogge
         }
     }
 
-    private static IEnumerable<(string Name, string Sql)> LoadScripts()
+    // Lee los scripts embebidos de una carpeta ("migrations/" o "seed/"), ordenados por nombre.
+    private static IEnumerable<(string Name, string Sql)> LoadScripts(string prefix)
     {
         var assembly = Assembly.GetExecutingAssembly();
-        var scripts = assembly.GetManifestResourceNames()
-            .Where(n => n.StartsWith("migrations/"))
+        var resources = assembly.GetManifestResourceNames()
+            .Where(n => n.StartsWith(prefix))
             .Order()
             .ToList();
 
-        if (scripts.Count == 0)
+        // Sin migraciones no hay esquema: mejor fallar que arrancar a medias.
+        if (prefix == "migrations/" && resources.Count == 0)
             throw new InvalidOperationException("No se encontraron scripts de migración embebidos. Revisa el .csproj.");
 
-        foreach (var resource in scripts)
+        foreach (var resource in resources)
         {
             using var stream = assembly.GetManifestResourceStream(resource)!;
             using var reader = new StreamReader(stream);
-            yield return (resource["migrations/".Length..], reader.ReadToEnd());
+            yield return (resource[prefix.Length..], reader.ReadToEnd());
         }
     }
 }

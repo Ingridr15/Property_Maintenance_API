@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="..\..\database\migrations\*.sql" LogicalName="migrations/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\database\seed\*.sql" LogicalName="seed/%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>
