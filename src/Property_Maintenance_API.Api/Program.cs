@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Dapper;
 using Property_Maintenance_API.Api.Infrastructure;
+using Property_Maintenance_API.Api.Features;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,6 +33,11 @@ app.MapGet("/health", async (SqlConnectionFactory db, CancellationToken ct) =>
     var tables = await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM sys.tables");
     return Results.Ok(new { status = "ok", tables });
 });
+
+app.MapPropertyEndpoints();
+app.MapTenantEndpoints();
+app.MapReportEndpoints();
+app.MapMaintenanceRequestQueries();
 
 await app.Services.GetRequiredService<MigrationRunner>().RunAsync(app.Lifetime.ApplicationStopping);
 
