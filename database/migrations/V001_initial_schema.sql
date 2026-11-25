@@ -115,3 +115,84 @@ GO
   END;
 
   GO
+
+  /* ---------------------------------------
+    Technicians : Persona que atiende las solicitudes
+ ---------------------------------------*/
+CREATE TABLE dbo.Technicians
+(
+    TechnicianId int IDENTITY(1,1) NOT NULL CONSTRAINT PK_Technicians PRIMARY KEY,
+    FullName     nvarchar(150) NOT NULL,
+    Specialty    varchar(20)   NOT NULL,
+    IsActive     bit           NOT NULL CONSTRAINT DF_Technicians_IsActive DEFAULT (1),
+    -- Trazabilidad. CreatedAt se llena sola, UpdatedAt la asigna la API en cada update.
+    CreatedAt    datetime2(0) NOT NULL CONSTRAINT DF_Technicians_CreatedAt DEFAULT (SYSUTCDATETIME()),
+    UpdatedAt    datetime2(0) NULL,
+    CONSTRAINT CK_Technicians_Specialty         CHECK (Specialty IN ('Plomeria', 'Electricidad', 'General')),
+    CONSTRAINT CK_Technicians_FullName_NotBlank CHECK (LEN(TRIM(FullName)) > 0)
+);
+
+GO
+
+/* ---------------------------------------
+    MaintenanceRequests : Problema reportado
+    REGLA #3 DE NEGOCIO : (la valida la API)
+    Flujo de estados 
+      Abierta -> Asignada -> EnProgreso -> Cerrada
+      Abierta / Asignada -> Cancelada
+ ---------------------------------------*/
+CREATE TABLE dbo.MaintenanceRequests
+(
+    MaintenanceRequestId int IDENTITY(1,1) NOT NULL CONSTRAINT PK_MaintenanceRequests PRIMARY KEY,
+    UnitId               int            NOT NULL CONSTRAINT FK_MaintenanceRequests_Units       REFERENCES dbo.Units (UnitId),
+    ReportedByTenantId   int            NOT NULL CONSTRAINT FK_MaintenanceRequests_Tenants     REFERENCES dbo.Tenants (TenantId),
+    AssignedTechnicianId int            NULL     CONSTRAINT FK_MaintenanceRequests_Technicians REFERENCES dbo.Technicians (TechnicianId),
+    Category             varchar(20)    NOT NULL,
+    Priority             varchar(10)    NOT NULL,
+    Status               varchar(20)    NOT NULL CONSTRAINT DF_MaintenanceRequests_Status DEFAULT ('Abierta'),
+    Description          nvarchar(2000) NOT NULL,
+    CreatedAt           datetime2(0)   NOT NULL CONSTRAINT DF_MaintenanceRequests_CreatedAt DEFAULT (SYSUTCDATETIME()),
+    ClosedAt             datetime2(0)   NULL,
+    UpdatedAt            datetime2(0)   NULL,
+    CONSTRAINT CK_MaintenanceRequests_Category CHECK (Category IN ('Plomeria', 'Electricidad', 'General')),
+    CONSTRAINT CK_MaintenanceRequests_Priority CHECK (Priority IN ('Baja', 'Media', 'Alta', 'Urgente')),
+    CONSTRAINT CK_MaintenanceRequests_Status   CHECK (Status IN ('Abierta', 'Asignada', 'EnProgreso', 'Cerrada', 'Cancelada')),
+    CONSTRAINT CK_MaintenanceRequests_Description_NotBlank CHECK (LEN(TRIM(Description)) > 0),
+   
+    -- REGLA #5 DE NEGOCIO: al cerrar se guarda la fecha de cierre (este CHECK).
+    -- Que tenga al menos una visita lo valida la API (está en otra tabla).    
+    CONSTRAINT CK_MaintenanceRequests_ClosedAt CHECK
+    (
+        (Status = 'Cerrada'  AND ClosedAt IS NOT NULL AND ClosedAt >= CreatedAt)
+     OR (Status <> 'Cerrada' AND ClosedAt IS NULL)
+    ),
+    -- REGLA #4 DE NEGOCIO: desde Asignada siempre hay técnico (este CHECK).
+    -- Que el técnico esté activo lo valida la API (está en otra tabla).    
+    CONSTRAINT CK_MaintenanceRequests_Technician CHECK
+    (
+        (Status = 'Abierta' AND AssignedTechnicianId IS NULL)
+     OR (Status IN ('Asignada', 'EnProgreso', 'Cerrada') AND AssignedTechnicianId IS NOT NULL)
+     OR (Status = 'Cancelada')
+    )
+);
+
+GO
+
+/* ---------------------------------------
+    Visits : Cada vez que un tecnico atiende una solicitud
+ ---------------------------------------*/
+CREATE TABLE dbo.Visits
+(
+    VisitId            int IDENTITY(1,1) NOT NULL CONSTRAINT PK_Visits PRIMARY KEY,
+    MaintenanceRequestId int            NOT NULL CONSTRAINT FK_Visits_MaintenanceRequests REFERENCES dbo.MaintenanceRequests (MaintenanceRequestId),
+    TechnicianId         int            NOT NULL CONSTRAINT FK_Visits_Technicians        REFERENCES dbo.Technicians (TechnicianId),
+    VisitedAt            datetime2(0)   NOT NULL,
+    Notes              nvarchar(2000) NULL,
+    Cost                 decimal(12,2)  NOT NULL,
+    -- Trazabilidad. CreatedAt se llena sola, UpdatedAt la asigna la API en cada update.
+    CreatedAt           datetime2(0)   NOT NULL CONSTRAINT DF_Visits_CreatedAt DEFAULT (SYSUTCDATETIME()),
+    UpdatedAt            datetime2(0)   NULL,
+    CONSTRAINT CK_Visits_Cost CHECK (Cost >= 0)    -- REGLA #6 DE NEGOCIO: Los costos de las visitas no pueden ser negativos.
+);
+
+GO
